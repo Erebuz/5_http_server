@@ -215,7 +215,7 @@ class HttpServer(unittest.TestCase):
         h = {}
         for k, v in enumerate(headers):
             if v3:
-                (name, value) = re.split(br"\s*:\s*", v, 1)
+                (name, value) = re.split(rb"\s*:\s*", v, 1)
             else:
                 (name, value) = re.split(r"\s*:\s*", v, 1)
             h[name] = value
