@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import unquote_plus
 
 HTTP_BODY_TERMINATOR = "\r\n\r\n"
-HTTP_HEADER_TERMINATOR = '\r\n'
+HTTP_HEADER_TERMINATOR = "\r\n"
 
 
 class EventBaseServer:
@@ -47,11 +47,16 @@ class EventBaseServer:
             self.server.close()
             print("Server stopped")
 
-    def handle_client(
+    async def handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        handler_task = self.process_request(reader, writer)
-        asyncio.create_task(handler_task)
+        try:
+            await self.process_request(reader, writer)
+        except Exception as e:
+            print("Exception", e)
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
     async def process_request(
         self,
@@ -75,26 +80,22 @@ class EventBaseServer:
         #     msg.split(": ")[0]: msg.split(": ")[1] for msg in headers[1:] if msg
         # }
 
-        path_args = path_str.split('?')
+        path_args = path_str.split("?")
 
         path = path_args[0]
-        args = ''
-        if len(path_args) > 1:
-            args = path_args[1].split('&')
+        # args = ""
+        # if len(path_args) > 1:
+        #     args = path_args[1].split("&")
 
         self.request_router(method, unquote_plus(path), writer)
 
         await writer.drain()
 
-        writer.close()
-        # правильное закрытие клиентского сокета
-        await writer.wait_closed()
-
     def request_router(
         self, method: str, path: str, writer: asyncio.StreamWriter
     ) -> None:
         if method not in ["GET", "HEAD"]:
-            msg = self.get_error_response(405, 'Method Not Allowed')
+            msg = self.get_error_response(405, "Method Not Allowed")
 
             writer.write(msg.encode("utf-8"))
             return
@@ -107,20 +108,21 @@ class EventBaseServer:
         if file_path.exists():
             self.write_file_to_writer(file_path, writer, method == "HEAD")
         else:
-            msg = self.get_error_response(404, 'Not Found')
+            msg = self.get_error_response(404, "Not Found")
             writer.write(msg.encode("utf-8"))
 
-
-    def get_error_response(self, error_code: int, error_msg: str):
-        response = 'HTTP/1.1 ' + str(error_code)  + " " + error_msg + "\r\n"
+    def get_error_response(self, error_code: int, error_msg: str) -> str:
+        response = "HTTP/1.1 " + str(error_code) + " " + error_msg + "\r\n"
         headers = {
             "Date": formatdate(timeval=None, localtime=False, usegmt=True),
             "Server": self.SERVER_HEADER,
-            "Content-Type": 'text/plain; charset=utf-8',
+            "Content-Type": "text/plain; charset=utf-8",
             "Content-Length": len(error_msg),
             "Connection": "keep-alive",
         }
-        response += HTTP_HEADER_TERMINATOR.join([": ".join([k, str(v)]) for k, v in headers.items()])
+        response += HTTP_HEADER_TERMINATOR.join(
+            [": ".join([k, str(v)]) for k, v in headers.items()]
+        )
         response += HTTP_BODY_TERMINATOR
         return response + error_msg
 
@@ -136,7 +138,9 @@ class EventBaseServer:
         }
 
         headers_str = "HTTP/1.1 200 OK\r\n"
-        headers_str += HTTP_HEADER_TERMINATOR.join([": ".join([k, str(v)]) for k, v in headers.items()])
+        headers_str += HTTP_HEADER_TERMINATOR.join(
+            [": ".join([k, str(v)]) for k, v in headers.items()]
+        )
         headers_str += HTTP_BODY_TERMINATOR
 
         writer.write(headers_str.encode("utf-8"))
