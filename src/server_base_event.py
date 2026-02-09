@@ -5,14 +5,15 @@ from email.utils import formatdate
 from pathlib import Path
 from urllib.parse import unquote_plus
 
-HTTP_TERMINATOR = b"\r\n\r\n"
+HTTP_BODY_TERMINATOR = "\r\n\r\n"
+HTTP_HEADER_TERMINATOR = '\r\n'
 
 
 class EventBaseServer:
     def __init__(
         self,
         host: str = "localhost",
-        port: int = 8080,
+        port: int = 80,
         root: str = "",
         public_root: str = "./www",
     ) -> None:
@@ -58,25 +59,28 @@ class EventBaseServer:
         writer: asyncio.StreamWriter,
     ) -> None:
         request = b""
-        while not request.endswith(HTTP_TERMINATOR):
+        while not request.endswith(HTTP_BODY_TERMINATOR.encode()):
             message_chunk = await reader.read(1024)
-
-            print(message_chunk)
 
             if not message_chunk:
                 return
 
             request += message_chunk
 
-        print(request)
-
         request_str = request.decode("utf-8")
 
-        headers = request_str.split("\r\n")
-        method, path, _ = headers[0].split()
+        headers = request_str.split(HTTP_HEADER_TERMINATOR)
+        method, path_str, _ = headers[0].split()
         # request_headers = {
         #     msg.split(": ")[0]: msg.split(": ")[1] for msg in headers[1:] if msg
         # }
+
+        path_args = path_str.split('?')
+
+        path = path_args[0]
+        args = ''
+        if len(path_args) > 1:
+            args = path_args[1].split('&')
 
         self.request_router(method, unquote_plus(path), writer)
 
@@ -90,7 +94,8 @@ class EventBaseServer:
         self, method: str, path: str, writer: asyncio.StreamWriter
     ) -> None:
         if method not in ["GET", "HEAD"]:
-            msg = "HTTP/1.1 405 Method Not Allowed\n\nMethod Not Allowed"
+            msg = self.get_error_response(405, 'Method Not Allowed')
+
             writer.write(msg.encode("utf-8"))
             return
 
@@ -102,8 +107,22 @@ class EventBaseServer:
         if file_path.exists():
             self.write_file_to_writer(file_path, writer, method == "HEAD")
         else:
-            msg = "HTTP/1.1 404 Not Found\n\nNot Found"
+            msg = self.get_error_response(404, 'Not Found')
             writer.write(msg.encode("utf-8"))
+
+
+    def get_error_response(self, error_code: int, error_msg: str):
+        response = 'HTTP/1.1 ' + str(error_code)  + " " + error_msg + "\r\n"
+        headers = {
+            "Date": formatdate(timeval=None, localtime=False, usegmt=True),
+            "Server": self.SERVER_HEADER,
+            "Content-Type": 'text/plain; charset=utf-8',
+            "Content-Length": len(error_msg),
+            "Connection": "keep-alive",
+        }
+        response += HTTP_HEADER_TERMINATOR.join([": ".join([k, str(v)]) for k, v in headers.items()])
+        response += HTTP_BODY_TERMINATOR
+        return response + error_msg
 
     def write_file_to_writer(
         self, file_path: Path, writer: asyncio.StreamWriter, empty_response: bool = True
@@ -111,14 +130,14 @@ class EventBaseServer:
         headers = {
             "Date": formatdate(timeval=None, localtime=False, usegmt=True),
             "Server": self.SERVER_HEADER,
-            "Content-Length": file_path.stat().st_size if not empty_response else 0,
             "Content-Type": self.get_content_type(file_path),
+            "Content-Length": file_path.stat().st_size,
             "Connection": "keep-alive",
         }
 
         headers_str = "HTTP/1.1 200 OK\r\n"
-        headers_str += "\r\n".join([": ".join([k, str(v)]) for k, v in headers.items()])
-        headers_str += "\r\n\r\n"
+        headers_str += HTTP_HEADER_TERMINATOR.join([": ".join([k, str(v)]) for k, v in headers.items()])
+        headers_str += HTTP_BODY_TERMINATOR
 
         writer.write(headers_str.encode("utf-8"))
 
@@ -134,8 +153,8 @@ class EventBaseServer:
         if not mime_type:
             return "application/octet-stream"
 
-        text_types = ["text/html", "text/css", "application/javascript", "text/plain"]
-        if mime_type in text_types or mime_type.startswith("text/"):
-            return f"{mime_type}; charset=utf-8"
+        # text_types = ["text/html", "text/css", "application/javascript", "text/plain"]
+        # if mime_type in text_types or mime_type.startswith("text/"):
+        #     return f"{mime_type}; charset=utf-8"
 
         return mime_type

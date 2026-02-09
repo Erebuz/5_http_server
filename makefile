@@ -6,6 +6,9 @@ PROJECT_NAME = 3_api_validator
 
 .PHONY: run lint
 
+run:
+	python ./httpd.py
+
 lint:
 	pre-commit run --all-files --color=never
 
